@@ -1,0 +1,55 @@
+-- Secondary indexes on the three time-series tables, kept separate from
+-- 001_schema.sql so they can be benchmarked before/after (see
+-- bench/bench_queries.cpp).
+--
+-- Every one of the 6 analytics queries (src/analytics/queries.h,
+-- sql/003_analytics.sql) joins on stock_locate and either filters, groups,
+-- orders, or partitions a window function by timestamp_ns -- see the
+-- per-query breakdown below. A composite (stock_locate, timestamp_ns) index
+-- is therefore the obvious starting point on all three time-series tables
+-- (messages, trades, book_snapshots); leading with stock_locate matches the
+-- join column every query uses to reach symbols.ticker, and the trailing
+-- timestamp_ns lets a query already scoped to one stock_locate avoid a
+-- separate sort/filesort for anything ordered or windowed by time.
+--
+-- Query-by-query (see sql/003_analytics.sql for the full query text):
+--   Q1 (VWAP by minute) -- trades JOIN symbols, GROUP BY ticker,
+--     minute_bucket (DIV on timestamp_ns). idx_trades_locate_time.
+--   Q2 (rolling midpoint volatility) -- book_snapshots JOIN symbols,
+--     PARTITION BY ticker ORDER BY timestamp_ns window function. This is
+--     the strongest candidate for a real win: the window function needs
+--     rows sorted by timestamp_ns within each ticker, which the composite
+--     index can provide directly (per stock_locate) instead of a filesort/
+--     temporary table. idx_book_snapshots_locate_time.
+--   Q3 (spread/depth by 1-second bucket) -- book_snapshots JOIN symbols,
+--     GROUP BY ticker, second_bucket. Same index as Q2.
+--   Q4 (order-to-trade ratio/cancel rate) -- messages JOIN symbols,
+--     GROUP BY ticker, no time filter at all. idx_messages_locate_time's
+--     leading stock_locate column still helps the join/group; the trailing
+--     timestamp_ns is along for the ride here, not load-bearing for this
+--     specific query.
+--   Q5 (imbalance regime vs. forward move) -- book_snapshots JOIN symbols,
+--     PARTITION BY ticker ORDER BY timestamp_ns (same window-function shape
+--     as Q2). Same index as Q2/Q3.
+--   Q6 (intraday volume profile) -- trades JOIN symbols, WHERE
+--     t.timestamp_ns BETWEEN ... (the one query with an actual time-range
+--     filter), GROUP BY ticker, half_hour_bucket. idx_trades_locate_time's
+--     leading column is stock_locate, not timestamp_ns, so it does not
+--     directly serve this filter (which carries no stock_locate predicate
+--     at all) -- a standalone index leading with timestamp_ns would be the
+--     correct tool for that specific access pattern. Deliberately NOT added
+--     here: trades has only 1,856 rows total, so a full table scan is
+--     already cheap enough that the optimizer is unlikely to prefer any
+--     index over it regardless -- see docs/performance_log.md for what
+--     EXPLAIN actually showed against the real loaded data rather than
+--     adding a second index on speculation alone.
+--
+-- Every table here is small by MySQL's standards (55,748 messages / 1,856
+-- trades / 934 book_snapshots, from the real ~100MB ITCH sample load) --
+-- see docs/performance_log.md for an honest accounting of which queries
+-- actually sped up and which didn't, rather than assuming these indexes
+-- help uniformly just because they exist.
+
+CREATE INDEX idx_messages_locate_time ON messages (stock_locate, timestamp_ns);
+CREATE INDEX idx_trades_locate_time ON trades (stock_locate, timestamp_ns);
+CREATE INDEX idx_book_snapshots_locate_time ON book_snapshots (stock_locate, timestamp_ns);

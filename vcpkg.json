@@ -1,0 +1,5 @@
+{
+  "name": "market-data-engine",
+  "version": "0.1.0",
+  "dependencies": ["mysql-connector-cpp", "gtest"]
+}

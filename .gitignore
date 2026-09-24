@@ -1,0 +1,41 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# ITCH sample data files (large binary, not committed)
+data/
+
+# vcpkg local artifacts
+vcpkg_installed/
+
+# IDE / editor
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+CMakeSettings.json
+CMakeUserPresets.json
+
+# Compiled binaries
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.exp
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Credentials -- never commit, even accidentally
+.env
+*.env
+.aws/
+credentials
+*.pem
+*secret*
